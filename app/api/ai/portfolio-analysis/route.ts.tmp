@@ -1,0 +1,252 @@
+import { type NextRequest, NextResponse } from "next/server"
+import { createClient } from "@/lib/supabase/server"
+import { generatePortfolioAnalysis } from "@/lib/ai"
+
+interface PortfolioInsight {
+  category: string
+  score: number
+  description: string
+  recommendation: string
+}
+
+interface PortfolioScores {
+  riskScore: number
+  diversificationScore: number
+  performanceScore: number
+}
+
+function calculateRiskScore(riskDistribution: Record<string, number>, totalValue: number): number {
+  const riskWeights = {
+    low: 1,
+    medium: 0.7,
+    high: 0.4
+  }
+
+  let weightedScore = 0
+  for (const [risk, amount] of Object.entries(riskDistribution)) {
+    const weight = riskWeights[risk as keyof typeof riskWeights] || 0.7
+    const proportion = amount / totalValue
+    weightedScore += weight * proportion
+  }
+
+  return Math.round(weightedScore * 100)
+}
+
+function calculateDiversificationScore(typeDistribution: Record<string, number>): number {
+  const totalValue = Object.values(typeDistribution).reduce((sum, val) => sum + val, 0)
+  const typeCount = Object.keys(typeDistribution).length
+
+  // Calculate concentration using Herfindahl-Hirschman Index (HHI)
+  const hhi = Object.values(typeDistribution).reduce((sum, amount) => {
+    const proportion = amount / totalValue
+    return sum + proportion * proportion
+  }, 0)
+
+  const baseScore = Math.round((1 - hhi) * 100)
+  const typeBonus = Math.min(20, typeCount * 5)
+  
+  return Math.min(100, baseScore + typeBonus)
+}
+
+function calculatePerformanceScore(returnPercentage: number): number {
+  const benchmarkReturn = 12
+  const ratio = returnPercentage / benchmarkReturn
+  const baseScore = Math.min(100, Math.max(0, ratio * 70))
+  const bonus = ratio > 1 ? Math.min(30, (ratio - 1) * 30) : 0
+  return Math.round(baseScore + bonus)
+}
+
+function calculatePortfolioScores(
+  investments: any[],
+  totalInvested: number,
+  currentValue: number
+): PortfolioScores {
+  const riskDistribution = investments.reduce((acc, inv) => {
+    const risk = inv.investment_products?.risk_level?.toLowerCase() || "medium"
+    acc[risk] = (acc[risk] || 0) + Number(inv.current_value)
+    return acc
+  }, {} as Record<string, number>)
+
+  const typeDistribution = investments.reduce((acc, inv) => {
+    const type = inv.investment_products?.investment_type || "OTHER"
+    acc[type] = (acc[type] || 0) + Number(inv.current_value)
+    return acc
+  }, {} as Record<string, number>)
+
+  const totalReturns = currentValue - totalInvested
+  const returnPercentage = totalInvested > 0 ? (totalReturns / totalInvested) * 100 : 0
+
+  return {
+    riskScore: calculateRiskScore(riskDistribution, currentValue),
+    diversificationScore: calculateDiversificationScore(typeDistribution),
+    performanceScore: calculatePerformanceScore(returnPercentage)
+  }
+}
+
+function formatInsights(aiAnalysis: string): PortfolioInsight[] {
+  const sections = aiAnalysis.split('\n\n')
+  const insights: PortfolioInsight[] = []
+  let currentCategory = ''
+
+  for (const section of sections) {
+    if (section.toLowerCase().includes('diversification')) {
+      currentCategory = 'Portfolio Diversification'
+    } else if (section.toLowerCase().includes('risk')) {
+      currentCategory = 'Risk Assessment'
+    } else if (section.toLowerCase().includes('performance')) {
+      currentCategory = 'Performance Review'
+    } else if (section.toLowerCase().includes('recommend')) {
+      currentCategory = 'Recommendations'
+    }
+
+    if (currentCategory && section.length > 20) {
+      const lines = section.split('\n')
+      insights.push({
+        category: currentCategory,
+        score: calculateSectionScore(section),
+        description: lines[0],
+        recommendation: lines[lines.length - 1]
+      })
+    }
+  }
+
+  if (insights.length === 0) {
+    insights.push({
+      category: 'Portfolio Overview',
+      score: 70,
+      description: 'Portfolio analysis completed successfully.',
+      recommendation: 'Consider reviewing your investment allocation regularly.'
+    })
+  }
+
+  return insights
+}
+
+function calculateSectionScore(content: string): number {
+  const positiveWords = ['excellent', 'good', 'strong', 'well', 'balanced', 'optimal']
+  const negativeWords = ['poor', 'weak', 'risky', 'unbalanced', 'concerning', 'inadequate']
+
+  const contentLower = content.toLowerCase()
+  const positiveCount = positiveWords.filter(word => contentLower.includes(word)).length
+  const negativeCount = negativeWords.filter(word => contentLower.includes(word)).length
+
+  const baseScore = 70
+  const adjustment = (positiveCount * 10) - (negativeCount * 10)
+  
+  return Math.min(100, Math.max(0, baseScore + adjustment))
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const supabase = await createClient()
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const { data: investments, error: investmentError } = await supabase
+      .from("user_investments")
+      .select(`
+        *,
+        investment_products (
+          name,
+          investment_type,
+          annual_yield,
+          risk_level
+        )
+      `)
+      .eq("user_id", user.id)
+      .eq("status", "active")
+
+    if (investmentError) {
+      throw new Error("Failed to fetch investments: " + investmentError.message)
+    }
+
+    if (!investments?.length) {
+      return NextResponse.json({
+        analysis: {
+          overallScore: 0,
+          riskScore: 0,
+          diversificationScore: 0,
+          performanceScore: 0,
+          insights: [
+            {
+              category: "Getting Started",
+              score: 0,
+              description: "Start your investment journey by exploring our available products.",
+              recommendation: "Consider investing in low-risk products initially.",
+            },
+          ],
+        }
+      })
+    }
+
+    const totalInvested = investments.reduce((sum, inv) => sum + Number(inv.invested_amount), 0)
+    const currentValue = investments.reduce((sum, inv) => sum + Number(inv.current_value), 0)
+    
+    const insights = await generatePortfolioAnalysis({
+      totalValue: currentValue,
+      investments: investments.map(inv => ({
+        name: inv.investment_products?.name || "Unknown Investment",
+        amount: Number(inv.current_value),
+        returns: ((Number(inv.current_value) - Number(inv.invested_amount)) / Number(inv.invested_amount)) * 100,
+        type: inv.investment_products?.investment_type || "OTHER"
+      }))
+    })
+
+    const scores = calculatePortfolioScores(investments, totalInvested, currentValue)
+
+    await supabase.from("transaction_logs").insert({
+      user_id: user.id,
+      endpoint: "/api/ai/portfolio-analysis",
+      http_method: "GET",
+      status_code: 200,
+      response_data: { scores }
+    })
+
+    return NextResponse.json({
+      analysis: {
+        overallScore: Math.round((scores.riskScore + scores.diversificationScore + scores.performanceScore) / 3),
+        ...scores,
+        insights: formatInsights(insights)
+      }
+    })
+  } catch (error) {
+    console.error("Portfolio analysis error:", error)
+
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    if (user) {
+      await supabase.from("transaction_logs").insert({
+        user_id: user.id,
+        endpoint: "/api/ai/portfolio-analysis",
+        http_method: "GET",
+        status_code: 500,
+        error_message: error instanceof Error ? error.message : "Unknown error"
+      })
+    }
+
+    return NextResponse.json(
+      {
+        error: "Failed to generate portfolio analysis",
+        analysis: {
+          overallScore: 0,
+          riskScore: 0,
+          diversificationScore: 0,
+          performanceScore: 0,
+          insights: [
+            {
+              category: "Error",
+              score: 0,
+              description: "Unable to analyze portfolio at this time",
+              recommendation: "Please try again later",
+            },
+          ],
+        },
+      },
+      { status: 500 }
+    )
+  }
+}
