@@ -1,10 +1,14 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+"use client";
+
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import { Navigation } from "@/components/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useState, useEffect } from "react";
+import type { User } from "@supabase/supabase-js";
 import {
     Select,
     SelectContent,
@@ -12,46 +16,193 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { User, Mail, Calendar, TrendingUp, Target, Shield } from "lucide-react";
 
-export default async function ProfilePage() {
-    const supabase = await createClient();
+interface UserProfile {
+    id: string;
+    first_name: string | null;
+    last_name: string | null;
+    age: number;
+    risk_appetite: string;
+    total_balance: number;
+    created_at: string;
+}
 
-    const { data, error } = await supabase.auth.getUser();
-    if (error || !data?.user) {
-        redirect("/auth/login");
-    }
+interface Investment {
+    id: string;
+    invested_amount: number;
+    investment_products: {
+        name: string;
+        investment_type: string;
+        risk_level: string;
+        annual_yield: number;
+    };
+}
+import {
+    User as UserIcon,
+    Mail,
+    Calendar,
+    TrendingUp,
+    Target,
+    Shield,
+} from "lucide-react";
 
-    // Fetch user profile
-    const { data: profile } = await supabase
-        .from("users")
-        .select("*")
-        .eq("id", data.user.id)
-        .single();
+export default function ProfilePage() {
+    const router = useRouter();
+    const [user, setUser] = useState<User | null>(null);
+    const [profile, setProfile] = useState<UserProfile | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [formData, setFormData] = useState({
+        first_name: "",
+        last_name: "",
+        age: 0,
+        risk_appetite: "moderate",
+        total_balance: 0,
+    });
+    const [updateStatus, setUpdateStatus] = useState({ message: "", type: "" });
 
-    // Fetch user investments for AI recommendations
-    const { data: investments } = await supabase
-        .from("user_investments")
-        .select(
-            `
-      *,
-      investment_products (
-        name,
-        investment_type,
-        risk_level,
-        annual_yield
-      )
-    `
-        )
-        .eq("user_id", data.user.id)
-        .eq("status", "active");
+    const [investments, setInvestments] = useState<Investment[] | null>(null);
+    const [totalInvested, setTotalInvested] = useState(0);
 
-    const totalInvested =
-        investments?.reduce(
-            (sum, inv) => sum + Number(inv.invested_amount),
-            0
-        ) || 0;
-    const isAdmin = data.user.email === "prakash.rawat.dev@gmail.com";
+    useEffect(() => {
+        const fetchData = async () => {
+            const supabase = createClient();
+            const { data: userData, error: userError } =
+                await supabase.auth.getUser();
+
+            if (userError || !userData?.user) {
+                router.push("/auth/login");
+                return;
+            }
+
+            setUser(userData.user);
+
+            // Fetch user profile
+            const { data: profileData, error: profileError } = await supabase
+                .from("users")
+                .select("*")
+                .eq("id", userData.user.id)
+                .single();
+
+            if (!profileError && profileData) {
+                setProfile(profileData);
+                setFormData({
+                    first_name: profileData.first_name || "",
+                    last_name: profileData.last_name || "",
+                    age: profileData.age || 0,
+                    risk_appetite: profileData.risk_appetite || "moderate",
+                    total_balance: profileData.total_balance || 0,
+                });
+
+                // Fetch user investments
+                const { data: investmentsData } = await supabase
+                    .from("user_investments")
+                    .select(
+                        `
+                        *,
+                        investment_products (
+                            name,
+                            investment_type,
+                            risk_level,
+                            annual_yield
+                        )
+                    `
+                    )
+                    .eq("user_id", userData.user.id)
+                    .eq("status", "active");
+
+                setInvestments(investmentsData);
+
+                // Calculate total invested
+                const total =
+                    investmentsData?.reduce(
+                        (sum, inv) => sum + Number(inv.invested_amount),
+                        0
+                    ) || 0;
+                setTotalInvested(total);
+            }
+        };
+
+        fetchData();
+    }, [router]);
+    const isAdmin = user?.email === "prakash.rawat.dev@gmail.com";
+
+    const handleUpdateProfile = async () => {
+        setIsLoading(true);
+        setUpdateStatus({ message: "", type: "" });
+
+        try {
+            if (!user?.id) {
+                throw new Error("User ID not found");
+            }
+
+            const supabase = createClient();
+
+            // First check if the user record exists
+            const { data: existingUser, error: checkError } = await supabase
+                .from("users")
+                .select()
+                .eq("id", user.id)
+                .single();
+
+            if (checkError) {
+                // If user doesn't exist, create a new record
+                const { error: insertError } = await supabase
+                    .from("users")
+                    .insert({
+                        id: user.id,
+                        first_name: formData.first_name,
+                        last_name: formData.last_name,
+                        age: formData.age,
+                        risk_appetite: formData.risk_appetite,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                    });
+
+                if (insertError) throw insertError;
+            } else {
+                // If user exists, update the record
+                const { error: updateError } = await supabase
+                    .from("users")
+                    .update({
+                        first_name: formData.first_name,
+                        last_name: formData.last_name,
+                        age: formData.age,
+                        risk_appetite: formData.risk_appetite,
+                        total_balance: formData.total_balance,
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq("id", user.id);
+
+                if (updateError) throw updateError;
+            }
+
+            setUpdateStatus({
+                message: "Profile updated successfully!",
+                type: "success",
+            });
+
+            // Refresh the profile data
+            const { data: newProfile } = await supabase
+                .from("users")
+                .select("*")
+                .eq("id", user.id)
+                .single();
+
+            if (newProfile) {
+                setProfile(newProfile);
+            }
+        } catch (error: any) {
+            console.error("Error updating profile:", error);
+            setUpdateStatus({
+                message:
+                    error.message ||
+                    "Failed to update profile. Please try again.",
+                type: "error",
+            });
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     // Generate AI recommendations based on profile
     const generateRecommendations = () => {
@@ -117,34 +268,48 @@ export default async function ProfilePage() {
                         <Card>
                             <CardHeader>
                                 <CardTitle className="flex items-center gap-2">
-                                    <User className="w-5 h-5" />
+                                    <UserIcon className="w-5 h-5" />
                                     Personal Information
                                 </CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
-                                        <Label htmlFor="name">Full Name</Label>
+                                        <Label htmlFor="first_name">
+                                            First Name
+                                        </Label>
                                         <Input
-                                            id="name"
-                                            defaultValue={profile?.name || ""}
+                                            id="first_name"
+                                            value={formData.first_name}
+                                            onChange={(e) =>
+                                                setFormData((prev) => ({
+                                                    ...prev,
+                                                    first_name: e.target.value,
+                                                }))
+                                            }
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="last_name">
+                                            Last Name
+                                        </Label>
+                                        <Input
+                                            id="last_name"
+                                            value={formData.last_name}
+                                            onChange={(e) =>
+                                                setFormData((prev) => ({
+                                                    ...prev,
+                                                    last_name: e.target.value,
+                                                }))
+                                            }
                                         />
                                     </div>
                                     <div>
                                         <Label htmlFor="email">Email</Label>
                                         <Input
                                             id="email"
-                                            defaultValue={data.user.email || ""}
+                                            value={user?.email || ""}
                                             disabled
-                                        />
-                                    </div>
-                                    <div>
-                                        <Label htmlFor="phone">
-                                            Phone Number
-                                        </Label>
-                                        <Input
-                                            id="phone"
-                                            defaultValue={profile?.phone || ""}
                                         />
                                     </div>
                                     <div>
@@ -152,7 +317,39 @@ export default async function ProfilePage() {
                                         <Input
                                             id="age"
                                             type="number"
-                                            defaultValue={profile?.age || ""}
+                                            min="0"
+                                            max="150"
+                                            value={formData.age}
+                                            onChange={(e) =>
+                                                setFormData((prev) => ({
+                                                    ...prev,
+                                                    age:
+                                                        parseInt(
+                                                            e.target.value
+                                                        ) || 0,
+                                                }))
+                                            }
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="total_balance">
+                                            Add Balance (₹)
+                                        </Label>
+                                        <Input
+                                            id="total_balance"
+                                            type="number"
+                                            min="0"
+                                            step="0.01"
+                                            value={formData.total_balance}
+                                            onChange={(e) =>
+                                                setFormData((prev) => ({
+                                                    ...prev,
+                                                    total_balance:
+                                                        parseFloat(
+                                                            e.target.value
+                                                        ) || 0,
+                                                }))
+                                            }
                                         />
                                     </div>
                                 </div>
@@ -161,8 +358,12 @@ export default async function ProfilePage() {
                                         Risk Appetite
                                     </Label>
                                     <Select
-                                        defaultValue={
-                                            profile?.risk_appetite || "moderate"
+                                        value={formData.risk_appetite}
+                                        onValueChange={(value) =>
+                                            setFormData((prev) => ({
+                                                ...prev,
+                                                risk_appetite: value,
+                                            }))
                                         }
                                     >
                                         <SelectTrigger>
@@ -184,8 +385,25 @@ export default async function ProfilePage() {
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <Button className="bg-green-600 hover:bg-green-700">
-                                    Update Profile
+                                {updateStatus.message && (
+                                    <div
+                                        className={`text-sm ${
+                                            updateStatus.type === "success"
+                                                ? "text-green-600"
+                                                : "text-red-600"
+                                        } mb-2`}
+                                    >
+                                        {updateStatus.message}
+                                    </div>
+                                )}
+                                <Button
+                                    className="cursor-pointer bg-green-600 hover:bg-green-700"
+                                    onClick={handleUpdateProfile}
+                                    disabled={isLoading}
+                                >
+                                    {isLoading
+                                        ? "Updating..."
+                                        : "Update Profile"}
                                 </Button>
                             </CardContent>
                         </Card>
@@ -217,7 +435,8 @@ export default async function ProfilePage() {
                                             <p className="font-medium">
                                                 {new Date(
                                                     profile?.created_at ||
-                                                        data.user.created_at
+                                                        (user?.created_at as string) ||
+                                                        new Date()
                                                 ).toLocaleDateString()}
                                             </p>
                                         </div>
@@ -264,7 +483,13 @@ export default async function ProfilePage() {
                                         <p className="text-sm text-green-800">
                                             {investments &&
                                             investments.length > 0
-                                                ? `You have ${investments.length} active investments. Consider diversifying across different asset classes.`
+                                                ? `You have ${
+                                                      investments.length
+                                                  } active investment${
+                                                      investments.length === 1
+                                                          ? ""
+                                                          : "s"
+                                                  }. Consider diversifying across different asset classes.`
                                                 : "Start your investment journey with our curated products."}
                                         </p>
                                     </div>
