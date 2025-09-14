@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const genAI = new GoogleGenerativeAI("AIzaSyDH1v8fLCKhfzLfrAGZ5qOg5wjLLsrOcoM");
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
 const MODEL_NAME = "gemini-1.0-pro";
 
 export async function generateProductDescription(productData: {

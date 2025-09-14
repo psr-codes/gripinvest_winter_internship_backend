@@ -1,0 +1,59 @@
+node_modules
+.next
+.git
+.env*
+npm-debug.log*
+README.md
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+## Docker Setup
+
+### Prerequisites
+- Docker Desktop installed
+- Docker Compose installed
+
+### Environment Variables
+Create a `.env` file in the root directory with:
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+GOOGLE_AI_API_KEY=your_gemini_api_key
+```
+
+### Running with Docker
+
+1. Build and start the containers:
+```bash
+docker-compose up --build
+```
+
+2. Access the application:
+- Frontend: http://localhost:3000
+- Database: localhost:5432
+
+### Common Docker Commands
+
+- Start containers in background:
+```bash
+docker-compose up -d
+```
+
+- Stop containers:
+```bash
+docker-compose down
+```
+
+- View logs:
+```bash
+docker-compose logs -f
+```
+
+- Rebuild containers:
+```bash
+docker-compose up --build
+```
+
+### Database Migrations
+Initial database setup will run automatically when the container starts.

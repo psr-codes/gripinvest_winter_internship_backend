@@ -6,7 +6,7 @@ export async function GET(request: NextRequest) {
     let userEmail: string | null = null;
 
     try {
-        const supabase = await createClient();
+        const supabase = createClient();
 
         // Get authenticated user (optional for GET products)
         const {
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
         if (error) {
             await logTransaction(
-                await createClient(),
+                supabase,
                 userId,
                 userEmail,
                 "GET",
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
     } catch (error) {
         const errorMessage =
             error instanceof Error ? error.message : "Unknown error";
-        const supabase = await createClient();
+        const supabase = createClient();
         await logTransaction(
             supabase,
             userId,
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
     let userEmail: string | null = null;
 
     try {
-        const supabase = await createClient();
+        const supabase = createClient();
 
         // Get authenticated user
         const {
@@ -117,33 +117,18 @@ export async function POST(request: NextRequest) {
             investment_type,
             annual_yield,
             risk_level,
-            min_investment,
+            minimum_investment,
             tenure_months,
             description,
         } = body;
-
-        // Log received data
-        console.log("Received request body:", body);
 
         if (
             !name ||
             !investment_type ||
             !annual_yield ||
             !risk_level ||
-            !min_investment
+            !minimum_investment
         ) {
-            const missingFields = [];
-            if (!name) missingFields.push("name");
-            if (!investment_type) missingFields.push("investment_type");
-            if (!annual_yield) missingFields.push("annual_yield");
-            if (!risk_level) missingFields.push("risk_level");
-            if (!min_investment) missingFields.push("min_investment");
-
-            const errorMessage = `Missing required fields: ${missingFields.join(
-                ", "
-            )}`;
-            console.log(errorMessage);
-
             await logTransaction(
                 supabase,
                 userId,
@@ -151,9 +136,12 @@ export async function POST(request: NextRequest) {
                 "POST",
                 "/api/products",
                 400,
-                errorMessage
+                "Missing required fields"
             );
-            return NextResponse.json({ error: errorMessage }, { status: 400 });
+            return NextResponse.json(
+                { error: "Missing required fields" },
+                { status: 400 }
+            );
         }
 
         // Create product
@@ -164,9 +152,10 @@ export async function POST(request: NextRequest) {
                 investment_type,
                 annual_yield,
                 risk_level,
-                min_investment,
+                minimum_investment,
                 tenure_months,
                 description,
+                is_active: true,
             });
 
         if (productError) {
@@ -224,8 +213,7 @@ async function logTransaction(
     errorMessage: string | null
 ) {
     try {
-        const client = await createClient();
-        await client.from("transaction_logs").insert({
+        await supabase.from("transaction_logs").insert({
             user_id: userId,
             email: userEmail,
             endpoint,
