@@ -330,7 +330,7 @@ export function ProductManagement() {
                             <DialogTrigger asChild>
                                 <Button
                                     onClick={resetForm}
-                                    className="bg-green-600 hover:bg-green-700"
+                                    className="cursor-pointer bg-green-600 hover:bg-green-700"
                                 >
                                     <Plus className="w-4 h-4 mr-2" />
                                     Add Product

@@ -6,6 +6,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BarChart3, TrendingUp, Shield, Target } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 interface PortfolioAnalysis {
     overallScore: number;
@@ -30,7 +31,33 @@ export function PortfolioAnalysis() {
 
     const fetchAnalysis = async () => {
         try {
-            const response = await fetch("/api/ai/portfolio-analysis");
+            // Get user session for authentication
+            const supabase = createClient();
+            const {
+                data: { session },
+            } = await supabase.auth.getSession();
+
+            let response;
+
+            // If user is authenticated, send token to get personalized analysis
+            if (session?.access_token) {
+                response = await fetch("/api/ai/portfolio-analysis", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    credentials: "include",
+                    body: JSON.stringify({
+                        token: session.access_token,
+                    }),
+                });
+            } else {
+                // Fallback for unauthenticated users
+                response = await fetch("/api/ai/portfolio-analysis", {
+                    method: "GET",
+                    credentials: "include",
+                });
+            }
 
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);

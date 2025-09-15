@@ -38,7 +38,7 @@ export default function HomePage() {
         if (user) {
             router.push("/dashboard");
         } else {
-            router.push("/auth/signup");
+            router.push("/auth/login");
         }
     };
 
@@ -125,7 +125,7 @@ export default function HomePage() {
                         <Button
                             size="lg"
                             onClick={handleGetStarted}
-                            className="bg-green-600 hover:bg-green-700 text-lg px-8 py-3"
+                            className=" cursor-pointer bg-green-600 hover:bg-green-700 text-lg px-8 py-3"
                         >
                             {user ? "Go to Dashboard" : "Start Investing"}
                             <ArrowRight className="ml-2 w-5 h-5" />
@@ -134,7 +134,7 @@ export default function HomePage() {
                             <Button
                                 variant="outline"
                                 size="lg"
-                                className="text-lg px-8 py-3 border-green-600 text-green-600 hover:bg-green-50"
+                                className="cursor-pointer  text-lg px-8 py-3 border-green-600 text-green-600 hover:bg-green-50"
                             >
                                 Explore Products
                             </Button>

@@ -1,61 +1,242 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 import { generateInvestmentRecommendations } from "@/lib/ai";
 
 export async function GET(request: NextRequest) {
     try {
-        const supabase = await createClient();
+        console.log("🧠 AI Recommendations API called (GET)");
 
+        // Create Supabase client with proper cookie handling
+        const supabase = createServerClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+            {
+                cookies: {
+                    getAll() {
+                        return request.cookies.getAll();
+                    },
+                    setAll() {
+                        // We don't need to set cookies in this API route
+                    },
+                },
+            }
+        );
+
+        console.log("🔍 Getting user session...");
+
+        // Get the user
         const {
             data: { user },
             error: authError,
         } = await supabase.auth.getUser();
+
+        console.log("👤 User check:", {
+            hasUser: !!user,
+            userId: user?.id,
+            userEmail: user?.email,
+            authError: authError?.message,
+        });
+
         if (authError || !user) {
+            console.log(
+                "❌ Authorization failed - using default recommendations"
+            );
+            // Return default recommendations for unauthenticated users
+            const defaultRecommendations = [
+                {
+                    type: "diversification",
+                    title: "Start with Mutual Funds",
+                    description:
+                        "Begin your investment journey with diversified equity mutual funds for long-term growth.",
+                    priority: "high",
+                    action: "Explore our curated mutual fund selection",
+                },
+                {
+                    type: "risk_management",
+                    title: "Build Emergency Fund",
+                    description:
+                        "Secure your finances with liquid funds before investing in market-linked products.",
+                    priority: "high",
+                    action: "Consider liquid funds for emergency corpus",
+                },
+            ];
+
+            return NextResponse.json({
+                recommendations: defaultRecommendations,
+                isPersonalized: false,
+            });
+        }
+
+        console.log(
+            "✅ User authenticated, generating personalized recommendations"
+        );
+
+        // Generate AI recommendations
+        const userProfile = {
+            id: user.id,
+            email: user.email || "user@example.com",
+            first_name: user.user_metadata?.first_name,
+            last_name: user.user_metadata?.last_name,
+            age: user.user_metadata?.age,
+            risk_appetite: user.user_metadata?.risk_appetite,
+            total_balance: user.user_metadata?.total_balance,
+        };
+
+        const aiResponse = await generateInvestmentRecommendations(userProfile);
+        console.log(
+            "🤖 AI generated response:",
+            aiResponse ? "Success" : "Failed"
+        );
+
+        // Parse AI response into structured recommendations
+        const recommendations =
+            parseAIRecommendations(aiResponse) || getDefaultRecommendations();
+        console.log("📋 Parsed recommendations count:", recommendations.length);
+
+        return NextResponse.json({
+            recommendations,
+            isPersonalized: true,
+        });
+    } catch (error) {
+        console.error("❌ AI Recommendations Error:", error);
+
+        // Return default recommendations on error instead of failing
+        const defaultRecommendations = getDefaultRecommendations();
+        return NextResponse.json({
+            recommendations: defaultRecommendations,
+            isPersonalized: false,
+            error: "Failed to generate personalized recommendations",
+        });
+    }
+}
+
+export async function POST(request: NextRequest) {
+    try {
+        console.log("🧠 AI Recommendations API called (POST with token)");
+
+        const body = await request.json();
+        const { token } = body;
+
+        if (!token) {
             return NextResponse.json(
-                { error: "Unauthorized" },
-                { status: 401 }
+                { error: "Token required" },
+                { status: 400 }
             );
         }
 
-        // Fetch user's current investments and profile
-        const { data: investments } = await supabase
-            .from("investments")
-            .select(
-                `
-        *,
-        investment_products (
-          name,
-          investment_type,
-          annual_yield,
-          risk_level
-        )
-      `
-            )
-            .eq("user_id", user.id)
-            .eq("status", "active");
-
-        const { data: profile } = await supabase
-            .from("users")
-            .select("*")
-            .eq("id", user.id)
-            .single();
-
-        // Generate AI recommendations based on user profile and portfolio
-        const recommendations = await generateAIRecommendations(
-            user,
-            profile,
-            investments || []
+        // Create Supabase client with token
+        const supabase = createClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
         );
 
-        console.log("Generated Recommendations:", recommendations);
-        return NextResponse.json({ recommendations });
+        // Get user from token
+        const {
+            data: { user },
+            error: authError,
+        } = await supabase.auth.getUser(token);
+
+        console.log("👤 Token user check:", {
+            hasUser: !!user,
+            userId: user?.id,
+            userEmail: user?.email,
+            authError: authError?.message,
+        });
+
+        if (authError || !user) {
+            console.log(
+                "❌ Token authorization failed - using default recommendations"
+            );
+            // Return default recommendations
+            const defaultRecommendations = [
+                {
+                    type: "diversification",
+                    title: "Start with Mutual Funds",
+                    description:
+                        "Begin your investment journey with diversified equity mutual funds for long-term growth.",
+                    priority: "high",
+                    action: "Explore our curated mutual fund selection",
+                },
+            ];
+
+            return NextResponse.json({
+                recommendations: defaultRecommendations,
+                isPersonalized: false,
+            });
+        }
+
+        console.log(
+            "✅ User authenticated via token, generating personalized recommendations"
+        );
+
+        // Generate AI recommendations
+        const userProfile = {
+            id: user.id,
+            email: user.email || "user@example.com",
+            first_name: user.user_metadata?.first_name,
+            last_name: user.user_metadata?.last_name,
+            age: user.user_metadata?.age,
+            risk_appetite: user.user_metadata?.risk_appetite,
+            total_balance: user.user_metadata?.total_balance,
+        };
+
+        const aiResponse = await generateInvestmentRecommendations(userProfile);
+        console.log(
+            "🤖 AI generated response:",
+            aiResponse ? "Success" : "Failed"
+        );
+
+        // Parse AI response into structured recommendations
+        const recommendations =
+            parseAIRecommendations(aiResponse) || getDefaultRecommendations();
+        console.log("📋 Parsed recommendations count:", recommendations.length);
+
+        return NextResponse.json({
+            recommendations,
+            isPersonalized: true,
+        });
     } catch (error) {
-        console.error("Error generating recommendations:", error);
-        return NextResponse.json(
-            { error: "Internal server error" },
-            { status: 500 }
-        );
+        console.error("❌ AI Recommendations Error:", error);
+
+        // Return default recommendations on error instead of failing
+        const defaultRecommendations = getDefaultRecommendations();
+        return NextResponse.json({
+            recommendations: defaultRecommendations,
+            isPersonalized: false,
+            error: "Failed to generate personalized recommendations",
+        });
     }
+}
+
+// Default recommendations for unauthenticated users or when errors occur
+function getDefaultRecommendations() {
+    return [
+        {
+            type: "diversification",
+            title: "Start with Diversified Portfolio",
+            description:
+                "Begin your investment journey with a well-balanced mix of equity and debt funds to spread risk.",
+            priority: "high",
+            action: "Consider investing in hybrid funds or balanced advantage funds for beginners.",
+        },
+        {
+            type: "performance_improvement",
+            title: "Explore SIP Investments",
+            description:
+                "Start a Systematic Investment Plan (SIP) to build wealth gradually through disciplined investing.",
+            priority: "medium",
+            action: "Set up monthly SIPs in large-cap equity funds for steady growth.",
+        },
+        {
+            type: "risk_management",
+            title: "Emergency Fund First",
+            description:
+                "Build an emergency fund covering 6-12 months of expenses before investing in market-linked products.",
+            priority: "high",
+            action: "Park emergency funds in liquid funds or high-yield savings accounts.",
+        },
+    ];
 }
 
 async function generateAIRecommendations(
@@ -63,222 +244,85 @@ async function generateAIRecommendations(
     profile: any,
     investments: any[]
 ) {
-    const totalInvested = investments.reduce(
-        (sum, inv) => sum + (inv.amount || 0),
-        0
-    );
+    try {
+        // Use the existing AI function
+        const recommendations = await generateInvestmentRecommendations(user);
+        return recommendations;
+    } catch (error) {
+        console.error("AI generation failed:", error);
+        return getDefaultRecommendations();
+    }
+}
 
-    // Create comprehensive user object for AI
-    const userForAI = {
-        id: user.id,
-        email: user.email,
-        first_name: profile?.first_name || "",
-        last_name: profile?.last_name || "",
-        age: profile?.age || null,
-        risk_appetite: profile?.risk_appetite || "moderate",
-        total_balance: profile?.total_balance || 0,
-    };
-
-    // Create portfolio data
-    const portfolioData = {
-        totalInvestment: totalInvested,
-        investments: investments.map((inv) => ({
-            name: inv.investment_products?.name || "Investment",
-            amount: inv.amount || 0,
-            type: inv.investment_products?.investment_type || "Unknown",
-            annual_yield: inv.investment_products?.annual_yield || null,
-        })),
-    };
+// Parse AI text response into structured recommendation objects
+function parseAIRecommendations(aiText: string | null): any[] {
+    if (!aiText || typeof aiText !== "string") {
+        return [];
+    }
 
     try {
-        const recommendationsText = await generateInvestmentRecommendations(
-            userForAI,
-            portfolioData
-        );
+        // Split by bullet points to extract individual recommendations
+        const recommendations = [];
+        const lines = aiText
+            .split("\n")
+            .filter((line) => line.trim().length > 0);
 
-        // Parse the AI response into structured recommendations
-        const recommendations = parseRecommendationsText(recommendationsText);
-        return recommendations.slice(0, 4); // Return top 4 recommendations
-    } catch (error) {
-        console.error("Error generating AI recommendations:", error);
+        let currentRec = null;
 
-        // Fallback to rule-based recommendations
-        return generateFallbackRecommendations(investments, totalInvested);
-    }
-}
+        for (const line of lines) {
+            const trimmedLine = line.trim();
 
-function parseRecommendationsText(text: string) {
-    // Split text into lines and clean them
-    const lines = text
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
-    const recommendations = [];
-
-    // Look for actual recommendation patterns
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-
-        // Skip headers, preambles, and general text
-        if (
-            line.includes("Investment Recommendations for") ||
-            line.includes("**Investment Recommendations:**") ||
-            line.includes("**1. Investment Recommendations:**") ||
-            line.includes("Given your") ||
-            line.includes("Prakash, given your") ||
-            line.includes("Based on your") ||
-            line.includes("Here are") ||
-            line.includes("suitable investment recommendations") ||
-            line.match(
-                /^\*\*\d+\.\s*Investment\s*Recommendations?\*\*:?\s*$/i
-            ) ||
-            line.length < 20 // Skip very short lines
-        ) {
-            continue;
-        }
-
-        // Look for actual recommendations (usually start with bullet points or numbers)
-        if (
-            line.startsWith("* **") ||
-            line.startsWith("• ") ||
-            line.startsWith("- ") ||
-            line.match(/^\d+\.\s*\*\*/) ||
-            line.match(/^\*\*\d+\./) ||
-            (line.includes("**") &&
-                (line.includes("Fund") ||
-                    line.includes("Bond") ||
-                    line.includes("Equity") ||
-                    line.includes("SIP") ||
-                    line.includes("Investment")))
-        ) {
-            // Extract recommendation details
-            let title = "";
-            let description = "";
-
-            // Extract title from markdown formatting
-            const titleMatch = line.match(/\*\*([^*]+)\*\*/);
-            if (titleMatch) {
-                title = titleMatch[1].replace(/^\d+\.\s*/, "").trim();
-            } else {
-                // Fallback: use first part as title
-                const parts = line.split(":");
-                title = parts[0].replace(/^[\*\-\•\d\.\s]+/, "").trim();
-            }
-
-            // Clean up description
-            description = line
-                .replace(/^\*\*[^*]+\*\*:?\s*/, "") // Remove title part
-                .replace(/^[\*\-\•\d\.\s]+/, "") // Remove bullets/numbers
-                .trim();
-
-            // If description is empty, use the cleaned line
-            if (!description) {
-                description = line.replace(/^[\*\-\•\d\.\s]+/, "").trim();
-            }
-
-            // Only add if we have meaningful content
-            if (title && description && description.length > 30) {
-                recommendations.push({
-                    type: "ai_generated",
-                    title: title,
-                    description: description,
-                    priority: recommendations.length < 2 ? "high" : "medium",
-                    action: "Consider this investment opportunity",
-                    products: extractProductNames(description),
-                });
-
-                // Limit to 4 recommendations
-                if (recommendations.length >= 4) break;
-            }
-        }
-    }
-
-    // If no structured recommendations found, fallback to paragraph parsing
-    if (recommendations.length === 0) {
-        const paragraphs = text
-            .split("\n\n")
-            .filter((p) => p.trim().length > 50);
-        for (let i = 0; i < Math.min(4, paragraphs.length); i++) {
-            const paragraph = paragraphs[i].trim();
+            // Check if this is a new recommendation (starts with * or bullet point)
             if (
-                !paragraph.includes("Investment Recommendations for") &&
-                !paragraph.includes("Given your") &&
-                (paragraph.includes("invest") ||
-                    paragraph.includes("fund") ||
-                    paragraph.includes("bond"))
+                trimmedLine.startsWith("*") ||
+                trimmedLine.startsWith("•") ||
+                trimmedLine.includes("**")
             ) {
-                recommendations.push({
+                // Save previous recommendation if it exists
+                if (currentRec) {
+                    recommendations.push(currentRec);
+                }
+
+                // Extract title from the line (between ** markers or after bullet)
+                const titleMatch =
+                    trimmedLine.match(/\*\*([^*]+)\*\*/) ||
+                    trimmedLine.match(/\*\s*([^:]+):/);
+                const title = titleMatch
+                    ? titleMatch[1].trim()
+                    : trimmedLine.replace(/^\*+\s*/, "").split(":")[0];
+
+                // Extract description (everything after the title)
+                const description = trimmedLine
+                    .replace(/^\*+\s*/, "")
+                    .replace(/\*\*[^*]+\*\*:\s*/, "")
+                    .replace(/^[^:]+:\s*/, "");
+
+                currentRec = {
                     type: "ai_generated",
-                    title: `Investment Recommendation ${
-                        recommendations.length + 1
-                    }`,
-                    description: paragraph.replace(/^\*+\s*/, "").trim(),
-                    priority: recommendations.length < 2 ? "high" : "medium",
-                    action: "Consider this investment opportunity",
-                    products: extractProductNames(paragraph),
-                });
+                    title: title || "Investment Recommendation",
+                    description: description || "",
+                    priority: "medium",
+                    action: `Consider investing in ${
+                        title || "this option"
+                    } based on your profile`,
+                };
+            } else if (currentRec && trimmedLine.length > 0) {
+                // Continue building the description for the current recommendation
+                currentRec.description +=
+                    (currentRec.description ? " " : "") + trimmedLine;
             }
         }
-    }
 
-    return recommendations;
-}
-
-function extractProductNames(text: string): string[] {
-    const products = [];
-
-    // Common investment product patterns
-    const patterns = [
-        /([A-Z][a-zA-Z\s]+(?:Fund|ETF|Bond|Equity|Index))/g,
-        /(Nifty\s+\w+)/g,
-        /(SBI\s+[A-Z][a-zA-Z\s]+)/g,
-        /(Axis\s+[A-Z][a-zA-Z\s]+)/g,
-        /(HDFC\s+[A-Z][a-zA-Z\s]+)/g,
-        /(Kotak\s+[A-Z][a-zA-Z\s]+)/g,
-    ];
-
-    patterns.forEach((pattern) => {
-        const matches = text.match(pattern);
-        if (matches) {
-            matches.forEach((match) => {
-                const cleaned = match.trim();
-                if (cleaned.length > 3 && !products.includes(cleaned)) {
-                    products.push(cleaned);
-                }
-            });
+        // Add the last recommendation
+        if (currentRec) {
+            recommendations.push(currentRec);
         }
-    });
 
-    return products.slice(0, 3); // Limit to 3 products per recommendation
-}
-
-function generateFallbackRecommendations(
-    investments: any[],
-    totalInvested: number
-) {
-    const recommendations = [];
-
-    if (investments.length < 3 && totalInvested > 50000) {
-        recommendations.push({
-            type: "diversification",
-            title: "Diversify Your Portfolio",
-            description:
-                "Consider adding different asset classes to reduce risk and improve returns.",
-            priority: "high",
-            action: "Explore mutual funds and bonds to balance your portfolio",
-        });
+        return recommendations.length > 0
+            ? recommendations
+            : getDefaultRecommendations();
+    } catch (error) {
+        console.error("Error parsing AI recommendations:", error);
+        return getDefaultRecommendations();
     }
-
-    if (totalInvested < 100000) {
-        recommendations.push({
-            type: "increase_investment",
-            title: "Increase Investment Amount",
-            description:
-                "Consider increasing your monthly investment to accelerate wealth building.",
-            priority: "medium",
-            action: "Set up a systematic investment plan",
-        });
-    }
-
-    return recommendations.slice(0, 4);
 }

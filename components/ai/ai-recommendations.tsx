@@ -21,6 +21,7 @@ import {
     Eye,
     RefreshCw,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 interface Recommendation {
     type: string;
@@ -47,11 +48,49 @@ export function AIRecommendations() {
             if (isRefresh) {
                 setIsRefreshing(true);
             }
-            const response = await fetch("/api/ai/recommendations");
+
+            // Get user session for authentication
+            const supabase = createClient();
+            const {
+                data: { session },
+            } = await supabase.auth.getSession();
+
+            let response;
+
+            // If user is authenticated, send token to get personalized recommendations
+            if (session?.access_token) {
+                response = await fetch("/api/ai/recommendations", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    credentials: "include",
+                    body: JSON.stringify({
+                        token: session.access_token,
+                    }),
+                });
+            } else {
+                // Fallback for unauthenticated users
+                response = await fetch("/api/ai/recommendations", {
+                    method: "GET",
+                    credentials: "include",
+                });
+            }
+
             const data = await response.json();
-            setRecommendations(data.recommendations || []);
+
+            // Ensure we always have an array to work with
+            const recommendationsArray = Array.isArray(data.recommendations)
+                ? data.recommendations
+                : Array.isArray(data)
+                ? data
+                : [];
+
+            setRecommendations(recommendationsArray);
         } catch (error) {
             console.error("Error fetching recommendations:", error);
+            // Set empty array on error to prevent mapping issues
+            setRecommendations([]);
         } finally {
             setIsLoading(false);
             setIsRefreshing(false);
