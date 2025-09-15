@@ -1,99 +1,58 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
 
 export async function POST(request: NextRequest) {
     try {
-        console.log("🔐 Investment API called");
+        console.log("🔐 Direct Investment API called");
 
-        const supabase = await createClient();
+        // Parse request body first to get the token
+        const body = await request.json();
+        const { productId, amount, productName, tenureMonths, userToken } =
+            body;
 
-        console.log("📋 Getting user session...");
+        console.log("📊 Request data:", {
+            productId,
+            amount,
+            productName,
+            tenureMonths,
+            hasToken: !!userToken,
+        });
 
-        // First try to get user from session/cookies
+        if (!userToken) {
+            return NextResponse.json(
+                { error: "Authentication token required" },
+                { status: 401 }
+            );
+        }
+
+        // Create Supabase client with the user's token
+        const supabase = createClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        );
+
+        // Set the session with the provided token
         const {
             data: { user },
             error: authError,
-        } = await supabase.auth.getUser();
+        } = await supabase.auth.getUser(userToken);
 
-        console.log("👤 User check (cookies):", {
+        console.log("👤 Token user check:", {
             hasUser: !!user,
             userId: user?.id,
             userEmail: user?.email,
             authError: authError?.message,
         });
 
-        // If cookies don't work, try Authorization header
         if (authError || !user) {
-            console.log("🔑 Trying Authorization header...");
-            const authHeader = request.headers.get("authorization");
-
-            if (authHeader && authHeader.startsWith("Bearer ")) {
-                const token = authHeader.substring(7);
-                console.log("🔑 Found auth token, verifying...");
-
-                // Create a new supabase client with the token
-                const supabaseWithToken = await createClient();
-                const {
-                    data: { user: tokenUser },
-                    error: tokenError,
-                } = await supabaseWithToken.auth.getUser(token);
-
-                console.log("👤 User check (token):", {
-                    hasUser: !!tokenUser,
-                    userId: tokenUser?.id,
-                    userEmail: tokenUser?.email,
-                    tokenError: tokenError?.message,
-                });
-
-                if (tokenUser && !tokenError) {
-                    console.log(
-                        "✅ User authenticated via token:",
-                        tokenUser.email
-                    );
-                    // Continue with tokenUser as the authenticated user
-                    return await processInvestment(
-                        request,
-                        supabase,
-                        tokenUser
-                    );
-                }
-            }
+            console.log("❌ Token authorization failed");
+            return NextResponse.json(
+                { error: "Invalid authentication token" },
+                { status: 401 }
+            );
         }
 
-        if (user && !authError) {
-            console.log("✅ User authenticated via cookies:", user.email);
-            return await processInvestment(request, supabase, user);
-        }
-
-        console.log("❌ Authorization failed");
-        return NextResponse.json(
-            { error: "Please log in to make an investment" },
-            { status: 401 }
-        );
-    } catch (error) {
-        console.error("❌ API Error:", error);
-        const errorMessage =
-            error instanceof Error ? error.message : "Unknown error";
-        return NextResponse.json({ error: errorMessage }, { status: 500 });
-    }
-}
-
-async function processInvestment(
-    request: NextRequest,
-    supabase: any,
-    user: any
-) {
-    try {
-        // Parse request body
-        const body = await request.json();
-        const { productId, amount, productName, tenureMonths } = body;
-
-        console.log("📊 Investment data:", {
-            productId,
-            amount,
-            productName,
-            tenureMonths,
-        });
+        console.log("✅ User authenticated via token:", user.email);
 
         if (!productId || !amount) {
             return NextResponse.json(
@@ -161,7 +120,7 @@ async function processInvestment(
             await supabase.from("transaction_logs").insert({
                 user_id: user.id,
                 email: user.email,
-                endpoint: "/api/investments",
+                endpoint: "/api/investments-direct",
                 http_method: "POST",
                 status_code: 200,
                 error_message: null,
@@ -173,7 +132,7 @@ async function processInvestment(
 
         return NextResponse.json({ success: true }, { status: 200 });
     } catch (error) {
-        console.error("❌ Investment creation error:", error);
+        console.error("❌ Direct Investment API Error:", error);
         const errorMessage =
             error instanceof Error ? error.message : "Unknown error";
         return NextResponse.json({ error: errorMessage }, { status: 500 });

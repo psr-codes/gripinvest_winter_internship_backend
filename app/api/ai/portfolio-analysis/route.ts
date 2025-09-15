@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        // Fetch user's investments
+        // Fetch user's investments and profile
         const { data: investments } = await supabase
             .from("investments")
             .select(
@@ -34,8 +34,18 @@ export async function GET(request: NextRequest) {
             .eq("user_id", user.id)
             .eq("status", "active");
 
+        const { data: profile } = await supabase
+            .from("users")
+            .select("*")
+            .eq("id", user.id)
+            .single();
+
         // Generate portfolio analysis
-        const analysis = await generatePortfolioAnalysisData(investments || []);
+        const analysis = await generatePortfolioAnalysisData(
+            user,
+            profile,
+            investments || []
+        );
 
         return NextResponse.json({ analysis });
     } catch (error) {
@@ -64,7 +74,11 @@ export async function GET(request: NextRequest) {
     }
 }
 
-async function generatePortfolioAnalysisData(investments: any[]) {
+async function generatePortfolioAnalysisData(
+    user: any,
+    profile: any,
+    investments: any[]
+) {
     const totalInvested = investments.reduce(
         (sum, inv) => sum + Number(inv.amount || 0),
         0
@@ -97,10 +111,21 @@ async function generatePortfolioAnalysisData(investments: any[]) {
         calculateDiversificationScore(typeDistribution);
     const performanceScore = calculatePerformanceScore(returnPercentage);
 
+    // Create comprehensive user object for AI
+    const userForAI = {
+        id: user.id,
+        email: user.email,
+        first_name: profile?.first_name || "",
+        last_name: profile?.last_name || "",
+        age: profile?.age || null,
+        risk_appetite: profile?.risk_appetite || "moderate",
+        total_balance: profile?.total_balance || 0,
+    };
+
     let aiInsights = "";
     try {
         if (investments.length > 0) {
-            aiInsights = await generatePortfolioAnalysis({
+            const portfolioData = {
                 totalValue: currentValue,
                 investments: investments.map((inv) => ({
                     name: inv.investment_products?.name || "Unknown",
@@ -111,8 +136,15 @@ async function generatePortfolioAnalysisData(investments: any[]) {
                             Number(inv.amount || 0)) *
                         100,
                     type: inv.investment_products?.investment_type || "UNKNOWN",
+                    annual_yield: inv.investment_products?.annual_yield || null,
+                    investment_products: inv.investment_products,
                 })),
-            });
+            };
+
+            aiInsights = await generatePortfolioAnalysis(
+                userForAI,
+                portfolioData
+            );
         } else {
             aiInsights =
                 "No active investments found. Consider starting your investment journey with diversified portfolio options.";

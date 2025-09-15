@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 interface InvestmentModalProps {
     isOpen: boolean;
@@ -53,7 +54,21 @@ export function InvestmentModal({
         setError(null);
 
         try {
-            const response = await fetch("/api/investments", {
+            // Get the current session to include the token
+            const supabase = createClient();
+            const {
+                data: { session },
+            } = await supabase.auth.getSession();
+
+            console.log("Making investment with session:", !!session);
+
+            if (!session?.access_token) {
+                setError("Please log in to make an investment");
+                router.push("/auth/login?returnTo=/products");
+                return;
+            }
+
+            const response = await fetch("/api/investments-direct", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -63,12 +78,19 @@ export function InvestmentModal({
                     amount: investmentAmount,
                     productName: product.name,
                     tenureMonths: product.tenure_months,
+                    userToken: session.access_token, // Pass the token directly
                 }),
             });
 
             const data = await response.json();
 
             if (!response.ok) {
+                // Handle authentication errors specifically
+                if (response.status === 401) {
+                    setError("Please log in to make an investment");
+                    router.push("/auth/login?returnTo=/products");
+                    return;
+                }
                 throw new Error(data.error || "Investment failed");
             }
 

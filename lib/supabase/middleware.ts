@@ -16,52 +16,78 @@ export async function updateSession(request: NextRequest) {
                 },
                 setAll(cookiesToSet) {
                     cookiesToSet.forEach(({ name, value, options }) => {
-                        const cookieOptions = {
-                            ...options,
-                            secure: process.env.NODE_ENV === "production",
-                            sameSite: "lax" as const,
-                            httpOnly: true,
-                        };
                         request.cookies.set(name, value);
                         supabaseResponse = NextResponse.next({
                             request,
                         });
-                        supabaseResponse.cookies.set(
-                            name,
-                            value,
-                            cookieOptions
-                        );
+                        supabaseResponse.cookies.set(name, value, options);
                     });
                 },
             },
         }
     );
 
+    // Attempt to refresh the session to handle token refresh
+    try {
+        await supabase.auth.getSession();
+    } catch (error) {
+        console.log("Session refresh failed:", error);
+    }
+
     const {
         data: { user },
+        error: userError,
     } = await supabase.auth.getUser();
 
-    // Allow certain pages to handle authentication client-side
-    const clientSideAuthPages = [
-        "/profile",
-        "/dashboard",
-        "/portfolio",
+    const pathname = request.nextUrl.pathname;
+
+    // Define public paths that don't require authentication
+    const publicPaths = [
+        "/",
+        "/auth/login",
+        "/auth/signup",
+        "/auth/verify-email",
         "/products",
-        "/transactions",
+        "/api/products",
+        "/_next",
+        "/favicon.ico",
+        "/public",
     ];
-    const isClientSideAuthPage = clientSideAuthPages.some((page) =>
-        request.nextUrl.pathname.startsWith(page)
+
+    // Define protected paths that require authentication
+    const protectedPaths = [
+        "/dashboard",
+        "/profile",
+        "/portfolio",
+        "/transactions",
+        "/admin",
+    ];
+
+    // Always allow public paths
+    const isPublicPath = publicPaths.some((path) => pathname.startsWith(path));
+    if (isPublicPath) {
+        return supabaseResponse;
+    }
+
+    // Check if trying to access protected path
+    const isProtectedPath = protectedPaths.some((path) =>
+        pathname.startsWith(path)
     );
 
-    if (
-        !user &&
-        !request.nextUrl.pathname.startsWith("/auth") &&
-        request.nextUrl.pathname !== "/" &&
-        !isClientSideAuthPage
-    ) {
-        const url = request.nextUrl.clone();
-        url.pathname = "/auth/login";
-        return NextResponse.redirect(url);
+    if (isProtectedPath) {
+        if (userError || !user) {
+            console.log(
+                "Redirecting to login - User error:",
+                userError,
+                "User:",
+                !!user
+            );
+            // Redirect to login with return URL
+            const url = request.nextUrl.clone();
+            url.pathname = "/auth/login";
+            url.searchParams.set("returnTo", pathname);
+            return NextResponse.redirect(url);
+        }
     }
 
     return supabaseResponse;

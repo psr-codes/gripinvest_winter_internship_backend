@@ -5,9 +5,11 @@ import { Navigation } from "@/components/navigation";
 import { ProductFilters } from "@/components/products/product-filters";
 import { ProductCard } from "@/components/products/product-card";
 import { InvestmentModal } from "@/components/products/investment-modal";
+import { AIRecommendations } from "@/components/ai/ai-recommendations";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
-import { Sparkles } from "lucide-react";
+import { Sparkles, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 interface Product {
     id: string;
@@ -31,10 +33,45 @@ export default function ProductsPage() {
     );
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    const [showRecommendations, setShowRecommendations] = useState(false);
+    const [user, setUser] = useState<any>(null);
+    const router = useRouter();
 
     useEffect(() => {
         fetchProducts();
+        checkAuth();
     }, []);
+
+    const checkAuth = async () => {
+        const supabase = createClient();
+        const {
+            data: { session },
+        } = await supabase.auth.getSession();
+
+        const {
+            data: { user },
+        } = await supabase.auth.getUser();
+
+        console.log("🔍 Products page auth check:", {
+            hasSession: !!session,
+            hasUser: !!user,
+            userEmail: user?.email,
+            sessionId: session?.access_token?.substring(0, 20),
+        });
+
+        // Test server-side auth
+        try {
+            const authTestResponse = await fetch("/api/auth/test", {
+                credentials: "include",
+            });
+            const authTestData = await authTestResponse.json();
+            console.log("🧪 Server auth test:", authTestData);
+        } catch (error) {
+            console.error("🧪 Server auth test failed:", error);
+        }
+
+        setUser(user);
+    };
 
     useEffect(() => {
         filterProducts();
@@ -100,11 +137,26 @@ export default function ProductsPage() {
     };
 
     const handleInvest = (productId: string) => {
+        if (!user) {
+            // Redirect to login with return URL
+            router.push(`/auth/login?returnTo=/products`);
+            return;
+        }
+
         const product = products.find((p) => p.id === productId);
         if (product) {
             setSelectedProduct(product);
             setIsModalOpen(true);
         }
+    };
+
+    const toggleRecommendations = () => {
+        if (!user) {
+            // Redirect to login with return URL
+            router.push(`/auth/login?returnTo=/products`);
+            return;
+        }
+        setShowRecommendations(!showRecommendations);
     };
 
     if (isLoading) {
@@ -138,13 +190,31 @@ export default function ProductsPage() {
                             products.
                         </p>
                     </div>
-                    <Button className="cursor-pointer bg-green-600 hover:bg-green-700 flex items-center gap-2">
-                        <Sparkles className="w-4 h-4" />
-                        Get AI Recommendations
+                    <Button
+                        onClick={toggleRecommendations}
+                        className="cursor-pointer bg-green-600 hover:bg-green-700 flex items-center gap-2"
+                    >
+                        {showRecommendations ? (
+                            <>
+                                <X className="w-4 h-4" />
+                                Hide AI Recommendations
+                            </>
+                        ) : (
+                            <>
+                                <Sparkles className="w-4 h-4" />
+                                Get AI Recommendations
+                            </>
+                        )}
                     </Button>
                 </div>
 
                 <div className="space-y-6">
+                    {showRecommendations && (
+                        <div className="mb-8">
+                            <AIRecommendations />
+                        </div>
+                    )}
+
                     <ProductFilters
                         onSearchChange={setSearchValue}
                         onTypeChange={setTypeValue}

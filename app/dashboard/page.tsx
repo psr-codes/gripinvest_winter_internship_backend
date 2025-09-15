@@ -1,5 +1,6 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+"use client";
+
+import { createClient } from "@/lib/supabase/client";
 import { Navigation } from "@/components/navigation";
 import { PortfolioStats } from "@/components/dashboard/portfolio-stats";
 import { RecentInvestments } from "@/components/dashboard/recent-investments";
@@ -8,29 +9,82 @@ import { PortfolioAnalysis } from "@/components/ai/portfolio-analysis";
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { User } from "@supabase/supabase-js";
 
-export default async function DashboardPage() {
-    const supabase = await createClient();
+export default function DashboardPage() {
+    const [user, setUser] = useState<User | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [investments, setInvestments] = useState<any[]>([]);
+    const router = useRouter();
 
-    const { data, error } = await supabase.auth.getUser();
-    if (error || !data?.user) {
-        redirect("/auth/login");
+    useEffect(() => {
+        const checkAuthAndLoadData = async () => {
+            const supabase = createClient();
+
+            // Check authentication
+            const {
+                data: { session },
+                error: sessionError,
+            } = await supabase.auth.getSession();
+
+            if (sessionError || !session?.user) {
+                console.log("No valid session, redirecting to login");
+                router.push("/auth/login?returnTo=/dashboard");
+                return;
+            }
+
+            setUser(session.user);
+
+            // Load investments data
+            try {
+                const { data: investmentsData } = await supabase
+                    .from("investments")
+                    .select(
+                        `
+                        *,
+                        investment_products (
+                            name,
+                            investment_type,
+                            annual_yield
+                        )
+                        `
+                    )
+                    .eq("user_id", session.user.id)
+                    .eq("status", "active");
+
+                setInvestments(investmentsData || []);
+            } catch (error) {
+                console.error("Error loading investments:", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        checkAuthAndLoadData();
+    }, [router]);
+
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto"></div>
+                    <p className="mt-4 text-gray-600">Loading dashboard...</p>
+                </div>
+            </div>
+        );
     }
 
-    const { data: investments } = await supabase
-        .from("investments")
-        .select(
-            `
-      *,
-      investment_products (
-        name,
-        investment_type,
-        annual_yield
-      )
-    `
-        )
-        .eq("user_id", data.user.id)
-        .eq("status", "active");
+    if (!user) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="text-center">
+                    <p className="text-gray-600">Redirecting to login...</p>
+                </div>
+            </div>
+        );
+    }
 
     const totalInvested =
         investments?.reduce((sum, inv) => sum + Number(inv.amount), 0) || 0;
@@ -73,7 +127,7 @@ export default async function DashboardPage() {
             };
         }) || [];
 
-    const isAdmin = data.user.email === "prakash.rawat.dev@gmail.com";
+    const isAdmin = user.email === "prakash.rawat.dev@gmail.com";
 
     return (
         <div className="min-h-screen bg-gray-50">
@@ -91,7 +145,7 @@ export default async function DashboardPage() {
                     </div>
                     <div className="flex gap-3">
                         <Link href="/products">
-                            <Button className="bg-green-600 hover:bg-green-700">
+                            <Button className="cursor-pointer bg-green-600 hover:bg-green-700">
                                 Explore Products
                             </Button>
                         </Link>
@@ -99,7 +153,7 @@ export default async function DashboardPage() {
                             <Link href="/admin">
                                 <Button
                                     variant="outline"
-                                    className="border-blue-600 text-blue-600 hover:bg-blue-50 bg-transparent"
+                                    className="cursor-pointer  border-blue-600 text-blue-600 hover:bg-blue-50 bg-transparent"
                                 >
                                     Admin Panel
                                 </Button>
@@ -112,22 +166,17 @@ export default async function DashboardPage() {
                     {/* Portfolio Statistics */}
                     <PortfolioStats {...portfolioData} />
 
-                    {/* Recent Investments and AI Insights */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                        <div className="lg:col-span-2">
-                            <RecentInvestments
-                                investments={recentInvestments}
-                            />
-                        </div>
-                        <div>
-                            <AIRecommendations />
-                        </div>
-                    </div>
+                    {/* Recent Investments - Full Width */}
+                    <RecentInvestments investments={recentInvestments} />
 
+                    {/* Portfolio Analysis and Quick Actions */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         <PortfolioAnalysis />
                         <QuickActions />
                     </div>
+
+                    {/* AI Recommendations - Full Width at Bottom */}
+                    <AIRecommendations />
                 </div>
             </main>
         </div>

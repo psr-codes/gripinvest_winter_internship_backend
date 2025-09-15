@@ -14,8 +14,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useState, useEffect } from "react";
 
 export default function LoginPage() {
     const [email, setEmail] = useState("");
@@ -23,6 +23,30 @@ export default function LoginPage() {
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const returnTo = searchParams.get("returnTo");
+
+    // Check if user is already logged in
+    useEffect(() => {
+        const checkSession = async () => {
+            const supabase = createClient();
+            const {
+                data: { session },
+                error,
+            } = await supabase.auth.getSession();
+
+            if (session && !error) {
+                console.log("🔍 User already logged in, redirecting...");
+                const redirectUrl =
+                    returnTo && returnTo !== "/auth/login"
+                        ? returnTo
+                        : "/dashboard";
+                router.push(redirectUrl);
+            }
+        };
+
+        checkSession();
+    }, [router, returnTo]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -54,36 +78,40 @@ export default function LoginPage() {
                 );
                 console.log("⏰ Session expires:", data.session.expires_at);
 
+                // Wait a bit to ensure session is properly stored
+                await new Promise((resolve) => setTimeout(resolve, 1000));
+
                 // Let's immediately test if we can retrieve the session
-                setTimeout(async () => {
-                    console.log("🔄 Testing session persistence...");
-                    const { data: sessionCheck } =
-                        await supabase.auth.getSession();
-                    console.log("🔎 Session check after login:", sessionCheck);
+                console.log("🔄 Testing session persistence...");
+                const { data: sessionCheck } = await supabase.auth.getSession();
+                console.log("🔎 Session check after login:", sessionCheck);
 
-                    const { data: userCheck } = await supabase.auth.getUser();
-                    console.log("👤 User check after login:", userCheck);
+                const { data: userCheck } = await supabase.auth.getUser();
+                console.log("👤 User check after login:", userCheck);
 
-                    // Check localStorage
-                    if (typeof window !== "undefined") {
-                        const keys = Object.keys(localStorage).filter((key) =>
-                            key.includes("supabase")
+                // Check localStorage
+                if (typeof window !== "undefined") {
+                    const keys = Object.keys(localStorage).filter((key) =>
+                        key.includes("supabase")
+                    );
+                    console.log("💾 LocalStorage supabase keys:", keys);
+                    keys.forEach((key) => {
+                        console.log(
+                            `💾 ${key}:`,
+                            localStorage.getItem(key)?.substring(0, 100) + "..."
                         );
-                        console.log("💾 LocalStorage supabase keys:", keys);
-                        keys.forEach((key) => {
-                            console.log(
-                                `💾 ${key}:`,
-                                localStorage.getItem(key)?.substring(0, 100) +
-                                    "..."
-                            );
-                        });
-                    }
-                }, 500); // Increased delay to ensure storage completes
+                    });
+                }
 
-                // Navigate to dashboard
-                console.log("🚀 Redirecting to dashboard...");
-                router.push("/dashboard");
-                router.refresh();
+                // Redirect to the original page or dashboard
+                const redirectUrl =
+                    returnTo && returnTo !== "/auth/login"
+                        ? returnTo
+                        : "/dashboard";
+                console.log("🚀 Redirecting to:", redirectUrl);
+
+                // Use router.push for better Next.js navigation
+                router.push(redirectUrl);
             } else {
                 throw new Error("Login failed - no session created");
             }
