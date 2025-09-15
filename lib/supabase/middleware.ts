@@ -41,10 +41,23 @@ export async function updateSession(request: NextRequest) {
         data: { user },
     } = await supabase.auth.getUser();
 
+    // Allow certain pages to handle authentication client-side
+    const clientSideAuthPages = [
+        "/profile",
+        "/dashboard",
+        "/portfolio",
+        "/products",
+        "/transactions",
+    ];
+    const isClientSideAuthPage = clientSideAuthPages.some((page) =>
+        request.nextUrl.pathname.startsWith(page)
+    );
+
     if (
         !user &&
         !request.nextUrl.pathname.startsWith("/auth") &&
-        request.nextUrl.pathname !== "/"
+        request.nextUrl.pathname !== "/" &&
+        !isClientSideAuthPage
     ) {
         const url = request.nextUrl.clone();
         url.pathname = "/auth/login";

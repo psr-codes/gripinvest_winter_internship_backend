@@ -30,87 +30,66 @@ export default function LoginPage() {
         setError(null);
 
         try {
-            // First, check if we can create the Supabase client
             const supabase = createClient();
-            if (!supabase) {
-                throw new Error("Could not initialize Supabase client");
-            }
+            console.log("🔐 Starting login process...");
 
-            // Attempt login
-            const {
-                data: { session },
-                error: loginError,
-            } = await supabase.auth
-                .signInWithPassword({
+            // Simple login with Supabase's built-in session handling
+            const { data, error: loginError } =
+                await supabase.auth.signInWithPassword({
                     email,
                     password,
-                })
-                .catch((e) => {
-                    console.error("Supabase auth error:", e);
-                    throw new Error(
-                        "Authentication failed - please check your network connection"
-                    );
                 });
+
+            console.log("🔍 Login response:", { data, error: loginError });
 
             if (loginError) throw loginError;
 
-            // Verify session was established
-            if (session) {
-                try {
-                    // Add timeout to the fetch request
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(
-                        () => controller.abort(),
-                        5000
-                    );
+            // Verify the login was successful
+            if (data.session && data.user) {
+                console.log("✅ Login successful!");
+                console.log("📧 User:", data.user.email);
+                console.log(
+                    "🎫 Session ID:",
+                    data.session.access_token.substring(0, 20) + "..."
+                );
+                console.log("⏰ Session expires:", data.session.expires_at);
 
-                    const response = await fetch("/api/auth/session", {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                            // Add a custom header to help debug if the request reaches the server
-                            "X-Request-ID": Date.now().toString(),
-                        },
-                        body: JSON.stringify({ session }),
-                        signal: controller.signal,
-                    }).catch((error) => {
-                        if (error.name === "AbortError") {
-                            throw new Error(
-                                "Request timeout - please try again"
+                // Let's immediately test if we can retrieve the session
+                setTimeout(async () => {
+                    console.log("🔄 Testing session persistence...");
+                    const { data: sessionCheck } =
+                        await supabase.auth.getSession();
+                    console.log("🔎 Session check after login:", sessionCheck);
+
+                    const { data: userCheck } = await supabase.auth.getUser();
+                    console.log("👤 User check after login:", userCheck);
+
+                    // Check localStorage
+                    if (typeof window !== "undefined") {
+                        const keys = Object.keys(localStorage).filter((key) =>
+                            key.includes("supabase")
+                        );
+                        console.log("💾 LocalStorage supabase keys:", keys);
+                        keys.forEach((key) => {
+                            console.log(
+                                `💾 ${key}:`,
+                                localStorage.getItem(key)?.substring(0, 100) +
+                                    "..."
                             );
-                        }
-                        throw new Error(
-                            "Network error - please check your connection"
-                        );
-                    });
-
-                    clearTimeout(timeoutId);
-
-                    if (!response.ok) {
-                        const errorData = await response.json();
-                        console.error("Server error response:", errorData);
-                        throw new Error(
-                            errorData.error || "Session establishment failed"
-                        );
+                        });
                     }
+                }, 500); // Increased delay to ensure storage completes
 
-                    await response.json(); // Make sure we can parse the response
-                    router.push("/dashboard");
-                    router.refresh();
-                } catch (sessionError: any) {
-                    console.error("Session error:", sessionError);
-                    throw new Error(
-                        sessionError.message ||
-                            "Failed to establish session. Please try again."
-                    );
-                }
+                // Navigate to dashboard
+                console.log("🚀 Redirecting to dashboard...");
+                router.push("/dashboard");
+                router.refresh();
             } else {
-                throw new Error("Failed to establish session");
+                throw new Error("Login failed - no session created");
             }
-        } catch (error: unknown) {
-            setError(
-                error instanceof Error ? error.message : "An error occurred"
-            );
+        } catch (error: any) {
+            console.error("Login error:", error);
+            setError(error.message || "Login failed. Please try again.");
         } finally {
             setIsLoading(false);
         }
@@ -120,74 +99,91 @@ export default function LoginPage() {
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 to-blue-50 p-4">
             <div className="w-full max-w-md">
                 <div className="text-center mb-8">
-                    <h1 className="text-3xl font-bold text-green-600 mb-2">
-                        GripInvest
+                    <h1 className="text-3xl font-bold text-gray-900">
+                        Welcome Back
                     </h1>
-                    <p className="text-gray-600">
-                        Welcome back to your investment journey
+                    <p className="text-gray-600 mt-2">
+                        Sign in to your Grip Investment account
                     </p>
                 </div>
 
                 <Card>
                     <CardHeader>
-                        <CardTitle className="text-2xl">Sign In</CardTitle>
+                        <CardTitle>Sign In</CardTitle>
                         <CardDescription>
-                            Enter your credentials to access your portfolio
+                            Enter your email and password to access your account
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <form onSubmit={handleLogin}>
-                            <div className="flex flex-col gap-4">
-                                <div className="grid gap-2">
-                                    <Label htmlFor="email">Email</Label>
-                                    <Input
-                                        id="email"
-                                        type="email"
-                                        placeholder="your@email.com"
-                                        required
-                                        value={email}
-                                        onChange={(e) =>
-                                            setEmail(e.target.value)
-                                        }
-                                    />
-                                </div>
-                                <div className="grid gap-2">
-                                    <Label htmlFor="password">Password</Label>
-                                    <Input
-                                        id="password"
-                                        type="password"
-                                        required
-                                        value={password}
-                                        onChange={(e) =>
-                                            setPassword(e.target.value)
-                                        }
-                                    />
-                                </div>
-                                {error && (
-                                    <p className="text-sm text-red-500">
-                                        {error}
-                                    </p>
-                                )}
-                                <Button
-                                    type="submit"
-                                    className="w-full bg-green-600 hover:bg-green-700"
+                        <form onSubmit={handleLogin} className="space-y-4">
+                            <div>
+                                <Label htmlFor="email">Email</Label>
+                                <Input
+                                    id="email"
+                                    type="email"
+                                    placeholder="Enter your email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    required
                                     disabled={isLoading}
-                                >
-                                    {isLoading ? "Signing in..." : "Sign In"}
-                                </Button>
+                                />
                             </div>
-                            <div className="mt-4 text-center text-sm">
-                                Don&apos;t have an account?{" "}
+                            <div>
+                                <Label htmlFor="password">Password</Label>
+                                <Input
+                                    id="password"
+                                    type="password"
+                                    placeholder="Enter your password"
+                                    value={password}
+                                    onChange={(e) =>
+                                        setPassword(e.target.value)
+                                    }
+                                    required
+                                    disabled={isLoading}
+                                />
+                            </div>
+
+                            {error && (
+                                <div className="text-red-600 text-sm bg-red-50 p-3 rounded">
+                                    {error}
+                                </div>
+                            )}
+
+                            <Button
+                                type="submit"
+                                className="w-full bg-green-600 hover:bg-green-700"
+                                disabled={isLoading}
+                            >
+                                {isLoading ? "Signing in..." : "Sign In"}
+                            </Button>
+                        </form>
+
+                        <div className="mt-6 text-center">
+                            <p className="text-sm text-gray-600">
+                                Don't have an account?{" "}
                                 <Link
                                     href="/auth/signup"
                                     className="text-green-600 hover:underline"
                                 >
                                     Sign up
                                 </Link>
-                            </div>
-                        </form>
+                            </p>
+                        </div>
                     </CardContent>
                 </Card>
+
+                <div className="mt-8 text-center">
+                    <p className="text-xs text-gray-500">
+                        By signing in, you agree to our{" "}
+                        <Link href="#" className="underline">
+                            Terms of Service
+                        </Link>{" "}
+                        and{" "}
+                        <Link href="#" className="underline">
+                            Privacy Policy
+                        </Link>
+                    </p>
+                </div>
             </div>
         </div>
     );

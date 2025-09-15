@@ -48,8 +48,11 @@ export default function ProductsPage() {
                 .select("*")
                 .order("annual_yield", { ascending: false });
 
+            console.log("fetching products...");
+
             if (error) throw error;
             setProducts(data || []);
+            console.log("Fetched products:", data);
         } catch (error) {
             console.error("Error fetching products:", error);
         } finally {
@@ -135,7 +138,7 @@ export default function ProductsPage() {
                             products.
                         </p>
                     </div>
-                    <Button className="bg-green-600 hover:bg-green-700 flex items-center gap-2">
+                    <Button className="cursor-pointer bg-green-600 hover:bg-green-700 flex items-center gap-2">
                         <Sparkles className="w-4 h-4" />
                         Get AI Recommendations
                     </Button>
@@ -160,7 +163,7 @@ export default function ProductsPage() {
                             <Button
                                 variant="outline"
                                 onClick={handleClearFilters}
-                                className="mt-4 bg-transparent"
+                                className="mt-4 bg-transparent cursor-pointer"
                             >
                                 Clear Filters
                             </Button>

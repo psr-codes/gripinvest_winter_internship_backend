@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar, Clock } from "lucide-react";
-
+import Link from "next/link";
 interface Investment {
     id: string;
     name: string;
@@ -67,8 +67,8 @@ export function RecentInvestments({ investments }: RecentInvestmentsProps) {
                         Your latest investment activities
                     </p>
                 </div>
-                <Button variant="outline" size="sm">
-                    View Full Portfolio
+                <Button variant="outline" size="sm" className="cursor-pointer">
+                    <Link href="/portfolio">View Full Portfolio</Link>
                 </Button>
             </CardHeader>
             <CardContent>

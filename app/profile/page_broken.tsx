@@ -29,7 +29,7 @@ interface UserProfile {
 
 interface Investment {
     id: string;
-    amount: number;
+    invested_amount: number;
     investment_products: {
         name: string;
         investment_type: string;
@@ -37,7 +37,6 @@ interface Investment {
         annual_yield: number;
     };
 }
-
 import {
     User as UserIcon,
     Mail,
@@ -52,7 +51,6 @@ export default function ProfilePage() {
     const [user, setUser] = useState<User | null>(null);
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [isLoading, setIsLoading] = useState(false);
-    const [isAuthLoading, setIsAuthLoading] = useState(true);
     const [formData, setFormData] = useState({
         first_name: "",
         last_name: "",
@@ -65,61 +63,82 @@ export default function ProfilePage() {
     const [investments, setInvestments] = useState<Investment[] | null>(null);
     const [totalInvested, setTotalInvested] = useState(0);
 
-    // Consolidated auth check and data fetching to prevent infinite loops
+    // Improved session check and auth state listener
     useEffect(() => {
-        let mounted = true; // Prevent state updates if component unmounted
         const supabase = createClient();
 
-        // Debug Supabase client configuration
-        console.log("🔧 Profile page initialized");
+        // Initial session check (avoids null on first load)
+        const checkSession = async () => {
+            const {
+                data: { session },
+                error,
+            } = await supabase.auth.getSession();
+            if (error || !session) {
+                router.push("/auth/login");
+            } else {
+                setUser(session.user);
+            }
+            console.log("Initial session is : ", session);
+        };
+        checkSession();
 
-        // Initial session check and data fetching
-        const initializeProfile = async () => {
-            console.log("🔍 Starting auth check and data fetch...");
+        // Listen for future auth changes
+        const {
+            data: { subscription: authListener },
+        } = supabase.auth.onAuthStateChange((_event, session) => {
+            if (session) {
+                setUser(session.user);
+            } else {
+                router.push("/auth/login");
+            }
+            console.log("Auth state change session is : ", session);
+        });
 
-            try {
-                // Check authentication
-                const { data: userData, error: userError } =
-                    await supabase.auth.getUser();
+        // Clean up listener
+        return () => {
+            authListener.unsubscribe();
+        };
+    }, [router]);
 
-                if (userError || !userData?.user) {
-                    console.log("❌ No user found, redirecting to login");
-                    router.push("/auth/login");
-                    return;
-                }
+    useEffect(() => {
+        const supabase = createClient();
 
-                if (!mounted) return; // Component unmounted, don't update state
+        // Initial session check
+        const fetchData = async () => {
+            const {
+                data: { session: currentSession },
+                error: sessionError,
+            } = await supabase.auth.getSession();
 
-                console.log("✅ User authenticated:", userData.user.email);
-                setUser(userData.user);
+            if (sessionError || !currentSession) {
+                router.push("/auth/login");
+                return;
+            }
 
-                // Now fetch profile data
-                const { data: profileData, error: profileError } =
-                    await supabase
-                        .from("users")
-                        .select("*")
-                        .eq("id", userData.user.id)
-                        .single();
+            setUser(currentSession.user);
 
-                if (!mounted) return;
+            // Fetch user profile
+            const { data: profileData, error: profileError } = await supabase
+                .from("users")
+                .select("*")
+                .eq("id", currentSession.user.id)
+                .single();
 
-                if (!profileError && profileData) {
-                    setProfile(profileData);
-                    setFormData({
-                        first_name: profileData.first_name || "",
-                        last_name: profileData.last_name || "",
-                        age: profileData.age || 0,
-                        risk_appetite: profileData.risk_appetite || "moderate",
-                        total_balance: profileData.total_balance || 0,
-                    });
-                }
+            if (!profileError && profileData) {
+                setProfile(profileData);
+                setFormData({
+                    first_name: profileData.first_name || "",
+                    last_name: profileData.last_name || "",
+                    age: profileData.age || 0,
+                    risk_appetite: profileData.risk_appetite || "moderate",
+                    total_balance: profileData.total_balance || 0,
+                });
 
-                // Fetch investments
-                const { data: investmentsData, error: investmentsError } =
-                    await supabase
-                        .from("investments")
-                        .select(
-                            `
+                // Fetch user investments
+                const { data: investmentsData } = await supabase
+                    .from("user_investments")
+                    .select(
+                        `
                         *,
                         investment_products (
                             name,
@@ -128,54 +147,24 @@ export default function ProfilePage() {
                             annual_yield
                         )
                     `
-                        )
-                        .eq("user_id", userData.user.id)
-                        .eq("status", "active");
+                    )
+                    .eq("user_id", currentSession.user.id)
+                    .eq("status", "active");
 
-                if (!mounted) return;
+                setInvestments(investmentsData);
 
-                if (!investmentsError) {
-                    setInvestments(investmentsData || []);
-                    const total =
-                        investmentsData?.reduce(
-                            (sum, inv) => sum + Number(inv.amount),
-                            0
-                        ) || 0;
-                    setTotalInvested(total);
-                } else {
-                    setInvestments([]);
-                    setTotalInvested(0);
-                }
-            } catch (err) {
-                console.error("💥 Profile initialization error:", err);
-                if (mounted) {
-                    router.push("/auth/login");
-                }
-            } finally {
-                if (mounted) {
-                    setIsAuthLoading(false);
-                }
+                // Calculate total invested
+                const total =
+                    investmentsData?.reduce(
+                        (sum, inv) => sum + Number(inv.invested_amount),
+                        0
+                    ) || 0;
+                setTotalInvested(total);
             }
         };
 
-        initializeProfile();
-
-        // Listen for auth changes (but don't refetch data on every change)
-        const {
-            data: { subscription: authListener },
-        } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (!session?.user && mounted) {
-                router.push("/auth/login");
-            }
-        });
-
-        // Cleanup
-        return () => {
-            mounted = false;
-            authListener.unsubscribe();
-        };
-    }, [router]); // Only depend on router, not user
-
+        fetchData();
+    }, [router]);
     const isAdmin = user?.email === "prakash.rawat.dev@gmail.com";
 
     const handleUpdateProfile = async () => {
@@ -214,7 +203,37 @@ export default function ProfilePage() {
             } else {
                 // If user exists, update the record
                 const { error: updateError } = await supabase
-                    .from("users")
+                    // Reliable client-side session check and auth state listener
+                    useEffect(() => {
+                        const supabase = createClient();
+
+                        // Initial session check using getUser()
+                        const checkUser = async () => {
+                            const { data: userData, error } = await supabase.auth.getUser();
+                            if (error || !userData?.user) {
+                                router.push("/auth/login");
+                            } else {
+                                setUser(userData.user);
+                            }
+                            console.log("Initial user is : ", userData?.user);
+                        };
+                        checkUser();
+
+                        // Listen for future auth changes
+                        const { data: { subscription: authListener } } = supabase.auth.onAuthStateChange((_event, session) => {
+                            if (session && session.user) {
+                                setUser(session.user);
+                            } else {
+                                router.push("/auth/login");
+                            }
+                            console.log("Auth state change session is : ", session);
+                        });
+
+                        // Clean up listener
+                        return () => {
+                            authListener.unsubscribe();
+                        };
+                    }, [router]);
                     .update({
                         first_name: formData.first_name,
                         last_name: formData.last_name,
@@ -290,18 +309,6 @@ export default function ProfilePage() {
 
         return recommendations;
     };
-
-    // Show loading screen while checking authentication
-    if (isAuthLoading) {
-        return (
-            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto"></div>
-                    <p className="mt-4 text-gray-600">Loading...</p>
-                </div>
-            </div>
-        );
-    }
 
     return (
         <div className="min-h-screen bg-gray-50">

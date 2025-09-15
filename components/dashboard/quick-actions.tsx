@@ -54,7 +54,7 @@ export function QuickActions() {
                             <Button
                                 variant="outline"
                                 size="sm"
-                                className="w-full bg-transparent"
+                                className=" cursor-pointer  w-full bg-transparent"
                             >
                                 <Link href={action.page}>{action.action}</Link>
                             </Button>
