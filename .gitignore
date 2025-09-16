@@ -17,7 +17,12 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files
+# Ignore all .env files
 .env*
+
+# But do not ignore .env.example
+!.env.example
+
 
 # vercel
 .vercel

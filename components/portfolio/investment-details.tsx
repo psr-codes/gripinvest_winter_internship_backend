@@ -94,7 +94,7 @@ export function InvestmentDetails({ investments }: InvestmentDetailsProps) {
                         <p className="text-gray-600 mb-4">
                             No investments found
                         </p>
-                        <Button className="bg-green-600 hover:bg-green-700">
+                        <Button className="cursor-pointer bg-green-600 hover:bg-green-700">
                             Start Investing
                         </Button>
                     </div>

@@ -82,7 +82,7 @@ export default function HomePage() {
                                         onClick={() =>
                                             router.push("/dashboard")
                                         }
-                                        className="bg-green-600 hover:bg-green-700"
+                                        className="cursor-pointer bg-green-600 hover:bg-green-700"
                                     >
                                         Go to Dashboard
                                     </Button>
